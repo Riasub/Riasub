@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>영업 대시보드</title>
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --blue:#2563eb;
+    --blue-light:#dbeafe;
+    --blue-dash:#93c5fd;
+    --gray-bg:#f4f6f9;
+    --gray-line:#e5e7eb;
+    --text-main:#111827;
+    --text-sub:#6b7280;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
+    background:var(--gray-bg);
+    color:var(--text-main);
+    padding:20px;
+  }
+  h1{
+    font-size:20px;
+    margin:0 0 16px 4px;
+  }
+  .cards{
+    display:grid;
+    grid-template-columns:1.4fr 1fr 1fr 1fr;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .card{
+    background:#fff;
+    border-radius:14px;
+    padding:18px 20px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.06);
+  }
+  .card .label{
+    font-size:13px;
+    color:var(--text-sub);
+    margin-bottom:6px;
+  }
+  .card .value{
+    font-size:26px;
+    font-weight:700;
+  }
+  .card.main .value{
+    font-size:34px;
+    color:var(--blue);
+  }
+  .card .sub{
+    font-size:12px;
+    color:var(--text-sub);
+    margin-top:4px;
+  }
+  .progress-bar{
+    margin-top:10px;
+    height:8px;
+    background:var(--gray-line);
+    border-radius:5px;
+    overflow:hidden;
+  }
+  .progress-bar .fill{
+    height:100%;
+    background:var(--blue);
+    border-radius:5px;
+    transition:width .4s;
+  }
+  .grid-main{
+    display:grid;
+    grid-template-columns:1.3fr 1fr;
+    gap:14px;
+    margin-bottom:14px;
+  }
+  .grid-bottom{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px;
+  }
+  .panel{
+    background:#fff;
+    border-radius:14px;
+    padding:20px;
+    box-shadow:0 1px 3px rgba(0,0,0,0.06);
+  }
+  .panel h2{
+    font-size:15px;
+    margin:0 0 14px 0;
+    font-weight:700;
+  }
+  .rank-row{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:12px;
+  }
+  .rank-row .rname{
+    width:110px;
+    font-size:13px;
+    flex-shrink:0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .rank-row .rbar-wrap{
+    flex:1;
+    background:var(--gray-line);
+    border-radius:5px;
+    height:14px;
+    overflow:hidden;
+  }
+  .rank-row .rbar{
+    height:100%;
+    background:var(--blue);
+    border-radius:5px;
+  }
+  .rank-row .ramount{
+    width:80px;
+    text-align:right;
+    font-size:13px;
+    font-weight:600;
+    flex-shrink:0;
+  }
+  .loading, .error{
+    padding:40px;
+    text-align:center;
+    color:var(--text-sub);
+  }
+  .error{ color:#dc2626; }
+
+  @media (max-width: 900px){
+    .cards{ grid-template-columns:1fr 1fr; }
+    .grid-main{ grid-template-columns:1fr; }
+    .grid-bottom{ grid-template-columns:1fr; }
+    .card.main{ grid-column:1 / -1; }
+  }
+</style>
+</head>
+<body>
+
+<h1>영업 대시보드</h1>
+
+<div id="app">
+  <div class="loading">데이터를 불러오는 중입니다...</div>
+</div>
+
+<script>
+const { createClient } = supabase;
+const db = createClient(
+  'https://phtlstdmazbqrstrfdrd.supabase.co',
+  'sb_publishable_sOTfM_2KuR_LSrLUa4_qSg_ck8H1TbR'
+);
+
+function formatNum(n){
+  return Math.round(n).toLocaleString('ko-KR');
+}
+
+async function loadData(){
+  const [{ data: monthly, error: e1 }, { data: pipeline, error: e2 }, { data: rank, error: e3 }] =
+    await Promise.all([
+      db.from('sales_monthly').select('*').order('sort_order', { ascending: true }),
+      db.from('sales_pipeline').select('*').order('sort_order', { ascending: true }),
+      db.from('sales_rank').select('*')
+    ]);
+
+  if (e1 || e2 || e3) {
+    document.getElementById('app').innerHTML =
+      '<div class="error">데이터를 불러오지 못했습니다.<br>' +
+      (e1?.message || e2?.message || e3?.message || '') + '</div>';
+    return;
+  }
+
+  render(monthly, pipeline, rank);
+}
+
+function render(monthly, pipeline, rank){
+  const app = document.getElementById('app');
+
+  // ---- 카드 계산 ----
+  const current = monthly[monthly.length - 1];
+  const revenue = current.revenue;
+  const target = current.target;
+  const remaining = Math.max(target - revenue, 0);
+  const achieveRate = target > 0 ? (revenue / target * 100) : 0;
+
+  const lastStage = pipeline[pipeline.length - 1];
+  const firstStage = pipeline[0];
+  const contractCount = lastStage.count;
+  const unitPrice = contractCount > 0 ? revenue / contractCount : 0;
+
+  // ---- 담당자 / 상품 순위 ----
+  const persons = rank.filter(r => r.kind === 'person').sort((a,b) => b.amount - a.amount);
+  const products = rank.filter(r => r.kind === 'product').sort((a,b) => b.amount - a.amount);
+
+  app.innerHTML = `
+    <div class="cards">
+      <div class="card main">
+        <div class="label">이번 달 매출</div>
+        <div class="value">${formatNum(revenue)}</div>
+        <div class="progress-bar"><div class="fill" style="width:${Math.min(achieveRate,100)}%"></div></div>
+        <div class="sub">목표 대비 ${achieveRate.toFixed(1)}% 달성</div>
+      </div>
+      <div class="card">
+        <div class="label">이번 달 목표</div>
+        <div class="value">${formatNum(target)}</div>
+        <div class="sub">남은 금액 ${formatNum(remaining)}</div>
+      </div>
+      <div class="card">
+        <div class="label">객단가</div>
+        <div class="value">${formatNum(unitPrice)}</div>
+        <div class="sub">매출 ÷ 계약 건수</div>
+      </div>
+      <div class="card">
+        <div class="label">계약 건수</div>
+        <div class="value">${formatNum(contractCount)}</div>
+        <div class="sub">${lastStage.stage} 단계 기준</div>
+      </div>
+    </div>
+
+    <div class="grid-main">
+      <div class="panel">
+        <h2>월별 매출</h2>
+        <div id="bar-chart"></div>
+      </div>
+      <div class="panel">
+        <h2>영업 단계 깔때기</h2>
+        <div id="funnel-chart"></div>
+      </div>
+    </div>
+
+    <div class="grid-bottom">
+      <div class="panel">
+        <h2>담당자별 순위</h2>
+        <div id="person-rank"></div>
+      </div>
+      <div class="panel">
+        <h2>상품별 순위</h2>
+        <div id="product-rank"></div>
+      </div>
+    </div>
+  `;
+
+  drawBarChart(monthly);
+  drawFunnel(pipeline);
+  drawRankList('person-rank', persons);
+  drawRankList('product-rank', products);
+}
+
+// ---- 월별 매출 막대그래프 (SVG) ----
+function drawBarChart(monthly){
+  const w = 600, h = 320;
+  const padL = 50, padR = 20, padT = 20, padB = 40;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+
+  const maxVal = Math.max(...monthly.map(m => Math.max(m.revenue, m.target))) * 1.15;
+  const n = monthly.length;
+  const gap = 16;
+  const barW = (chartW - gap * (n - 1)) / n;
+
+  const yScale = v => chartH - (v / maxVal) * chartH;
+  const currentIdx = n - 1;
+  const targetVal = monthly[currentIdx].target;
+  const targetY = padT + yScale(targetVal);
+
+  let bars = '';
+  let labels = '';
+  monthly.forEach((m, i) => {
+    const x = padL + i * (barW + gap);
+    const barH = chartH - yScale(m.revenue);
+    const y = padT + yScale(m.revenue);
+    const isCurrent = i === currentIdx;
+    bars += `
+      <rect x="${x}" y="${y}" width="${barW}" height="${barH}" rx="4"
+        fill="${isCurrent ? 'var(--blue)' : 'var(--blue-light)'}"></rect>
+      <text x="${x + barW/2}" y="${y - 8}" font-size="11" text-anchor="middle" fill="${isCurrent ? '#1e3a8a' : '#9ca3af'}" font-weight="${isCurrent ? '700':'400'}">${formatNum(m.revenue)}</text>
+    `;
+    labels += `<text x="${x + barW/2}" y="${h - padB + 18}" font-size="12" text-anchor="middle" fill="var(--text-sub)">${m.month}</text>`;
+  });
+
+  const svg = `
+  <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:100%;" xmlns="http://www.w3.org/2000/svg">
+    <line x1="${padL}" y1="${targetY}" x2="${w-padR}" y2="${targetY}"
+      stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,5"></line>
+    <text x="${w-padR}" y="${targetY - 6}" font-size="11" text-anchor="end" fill="#f59e0b">목표 ${formatNum(targetVal)}</text>
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h-padB}" stroke="var(--gray-line)"></line>
+    <line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="var(--gray-line)"></line>
+    ${bars}
+    ${labels}
+  </svg>`;
+  document.getElementById('bar-chart').innerHTML = svg;
+}
+
+// ---- 영업 단계 깔때기 (SVG) ----
+function drawFunnel(pipeline){
+  const w = 600;
+  const rowH = 56;
+  const gapY = 14;
+  const h = pipeline.length * (rowH + gapY) + 60;
+  const maxW = 460;
+  const centerX = w / 2;
+
+  const maxCount = pipeline[0].count;
+
+  let shapes = '';
+  pipeline.forEach((p, i) => {
+    const ratio = p.count / maxCount;
+    const barW = Math.max(maxW * ratio, 60);
+    const x = centerX - barW / 2;
+    const y = 10 + i * (rowH + gapY);
+
+    shapes += `
+      <rect x="${x}" y="${y}" width="${barW}" height="${rowH}" rx="8" fill="var(--blue)" opacity="${1 - i * 0.13}"></rect>
+      <text x="${centerX}" y="${y + rowH/2 - 4}" font-size="13" font-weight="700" text-anchor="middle" fill="#fff">${p.stage}</text>
+      <text x="${centerX}" y="${y + rowH/2 + 14}" font-size="12" text-anchor="middle" fill="#fff">${formatNum(p.count)}</text>
+    `;
+
+    if (i < pipeline.length - 1){
+      const next = pipeline[i+1];
+      const convRate = p.count > 0 ? (next.count / p.count * 100) : 0;
+      const midY = y + rowH + gapY / 2;
+      shapes += `<text x="${centerX}" y="${midY + 4}" font-size="11" text-anchor="middle" fill="var(--text-sub)">▼ ${convRate.toFixed(1)}%</text>`;
+    }
+  });
+
+  const finalRate = pipeline[0].count > 0
+    ? (pipeline[pipeline.length-1].count / pipeline[0].count * 100)
+    : 0;
+  const finalY = 10 + pipeline.length * (rowH + gapY) + 10;
+  shapes += `<text x="${centerX}" y="${finalY}" font-size="13" font-weight="700" text-anchor="middle" fill="var(--blue)">최종 전환율 ${finalRate.toFixed(1)}%</text>`;
+
+  const svg = `
+  <svg viewBox="0 0 ${w} ${h}" width="100%" style="max-width:100%;" xmlns="http://www.w3.org/2000/svg">
+    ${shapes}
+  </svg>`;
+  document.getElementById('funnel-chart').innerHTML = svg;
+}
+
+// ---- 순위 리스트 (막대 + 금액) ----
+function drawRankList(elId, items){
+  if (items.length === 0){
+    document.getElementById(elId).innerHTML = '<div class="sub">데이터가 없습니다.</div>';
+    return;
+  }
+  const maxAmount = Math.max(...items.map(i => i.amount));
+  let html = '';
+  items.forEach(i => {
+    const pct = maxAmount > 0 ? (i.amount / maxAmount * 100) : 0;
+    html += `
+      <div class="rank-row">
+        <div class="rname">${i.name}</div>
+        <div class="rbar-wrap"><div class="rbar" style="width:${pct}%"></div></div>
+        <div class="ramount">${formatNum(i.amount)}</div>
+      </div>
+    `;
+  });
+  document.getElementById(elId).innerHTML = html;
+}
+
+loadData();
+</script>
+</body>
+</html>
